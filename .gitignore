@@ -1,0 +1,20 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IDEs ###
+.idea/
+.vscode/
+.classpath
+.project
+.settings/
+*.iml
+
+### OS ###
+.DS_Store
+
+### Local secrets and generated architecture output ###
+secrets/
+graphify-out/
