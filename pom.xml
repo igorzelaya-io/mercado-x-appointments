@@ -43,11 +43,11 @@
     </properties>
 
     <dependencies>
-        <!-- MercadoX shared runtime and wire contracts. Persistence stays in this service. -->
+        <!-- MercadoX shared runtime, domain models, wire contracts, and repositories. -->
         <dependency>
             <groupId>hn.shadowcore</groupId>
             <artifactId>mercado-x-context</artifactId>
-            <version>1.0.1-SNAPSHOT</version>
+            <version>1.0.0</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.springframework.boot</groupId>
@@ -62,7 +62,7 @@
         <dependency>
             <groupId>hn.shadowcore</groupId>
             <artifactId>mercado-x-library-entity</artifactId>
-            <version>1.0.0-SNAPSHOT</version>
+            <version>1.0.0</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.springframework.boot</groupId>
@@ -73,6 +73,11 @@
                     <artifactId>spring-boot-starter-thymeleaf</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>hn.shadowcore</groupId>
+            <artifactId>mercado-x-library-jpa</artifactId>
+            <version>1.0.1</version>
         </dependency>
 
         <!-- HTTP, validation, security, and Google OAuth client support. -->

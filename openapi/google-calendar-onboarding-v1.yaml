@@ -1,0 +1,829 @@
+openapi: 3.1.0
+info:
+  title: MercadoX Appointments - Google Calendar Onboarding API
+  version: 1.0.0
+  description: |
+    Tenant-admin API for connecting one Google scheduling account to a MercadoX
+    organization, discovering calendars visible to that account, and assigning a
+    writable calendar to an appointment provider.
+
+    Except for the OAuth callback, every operation requires a MercadoX administrator
+    JWT. The organization identifier is derived from the verified authentication
+    context and is never accepted from a path, query parameter, or request body.
+  contact:
+    name: MercadoX
+externalDocs:
+  description: Google Calendar authorization scopes
+  url: https://developers.google.com/workspace/calendar/api/auth
+
+servers:
+  - url: /
+    description: Same origin as the deployed appointments service
+
+tags:
+  - name: Google Calendar Connections
+    description: Tenant-admin connection lifecycle operations.
+  - name: Google Calendars
+    description: Calendar discovery for the active tenant connection.
+  - name: Appointment Provider Calendars
+    description: Provider-to-calendar assignment operations.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/google-calendar/connections/start:
+    post:
+      tags:
+        - Google Calendar Connections
+      summary: Start Google Calendar authorization
+      description: |
+        Creates a short-lived, one-time authorization transaction for the authenticated
+        tenant administrator and returns the Google authorization URL. The server owns
+        the requested OAuth scopes. If the tenant connection requires renewed consent,
+        the response purpose is `REAUTHORIZE`.
+      operationId: startGoogleCalendarAuthorization
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartConnectionRequest'
+            example:
+              returnPath: /settings/appointments/integrations
+      responses:
+        '200':
+          description: Authorization transaction created.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartConnectionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/TemporaryUnavailable'
+
+  /api/v1/google-calendar/connections/callback:
+    get:
+      tags:
+        - Google Calendar Connections
+      summary: Receive the Google OAuth callback
+      description: |
+        Public redirect target called by Google. It does not accept tenant identity.
+        The server resolves the tenant, administrator, and allowlisted return path only
+        from the matching one-time authorization transaction. On a valid callback it
+        redirects the browser to the configured MercadoX frontend with a safe result.
+        Exactly one of `code` or `error` must be present.
+      operationId: handleGoogleCalendarCallback
+      security: []
+      parameters:
+        - name: state
+          in: query
+          required: true
+          description: Opaque one-time state returned by Google.
+          schema:
+            type: string
+            minLength: 32
+            maxLength: 2048
+        - name: code
+          in: query
+          required: false
+          description: Authorization code returned after consent.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4096
+        - name: error
+          in: query
+          required: false
+          description: OAuth error code returned when authorization is denied or fails.
+          schema:
+            type: string
+            maxLength: 255
+        - name: error_description
+          in: query
+          required: false
+          description: Provider error description. It is never forwarded verbatim to clients or logs.
+          schema:
+            type: string
+            maxLength: 2048
+      responses:
+        '303':
+          description: Redirect to the previously allowlisted MercadoX frontend path.
+          headers:
+            Location:
+              description: Frontend result location containing no OAuth credentials.
+              required: true
+              schema:
+                type: string
+                format: uri
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        '400':
+          description: Missing, invalid, expired, or already-consumed OAuth state.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                code: INVALID_OAUTH_STATE
+                message: The Google authorization request is invalid or has expired.
+                timestamp: '2026-09-02T18:30:00Z'
+                correlationId: 01991f2d-29e4-7c1a-b3aa-27055db5e89f
+
+  /api/v1/google-calendar/connections/current:
+    get:
+      tags:
+        - Google Calendar Connections
+      summary: Get the tenant Google Calendar connection
+      operationId: getCurrentGoogleCalendarConnection
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Connection status returned.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Google Calendar Connections
+      summary: Disconnect the tenant Google Calendar account
+      description: |
+        Idempotently revokes the Google grant when possible, permanently deletes the
+        stored refresh credential, clears transient credentials and calendar caches,
+        and removes provider/calendar assignments while preserving booking audit data.
+      operationId: disconnectCurrentGoogleCalendarConnection
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Connection is disconnected or was already disconnected.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisconnectConnectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/TemporaryUnavailable'
+
+  /api/v1/google-calendar/calendars:
+    get:
+      tags:
+        - Google Calendars
+      summary: List calendars visible to the connected scheduling account
+      description: |
+        Returns the minimum calendar metadata required for tenant-admin selection.
+        A calendar is selectable only when the authenticated Google account has an
+        effective write-capable access role.
+      operationId: listVisibleGoogleCalendars
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: pageSize
+          in: query
+          required: false
+          description: Maximum number of calendars to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+        - name: pageToken
+          in: query
+          required: false
+          description: Opaque MercadoX continuation token from a previous response.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 2048
+      responses:
+        '200':
+          description: Visible calendars returned.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/TemporaryUnavailable'
+
+  /api/v1/appointment-providers/{providerId}/calendar:
+    parameters:
+      - name: providerId
+        in: path
+        required: true
+        description: Tenant-owned appointment provider identifier.
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CorrelationId'
+
+    put:
+      tags:
+        - Appointment Provider Calendars
+      summary: Assign a Google calendar to an appointment provider
+      description: |
+        Resolves the active connection from the authenticated tenant, verifies that the
+        calendar is visible and write-capable, and assigns it to the provider. Neither
+        organization ID nor connection ID is accepted from the request.
+      operationId: assignProviderGoogleCalendar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignProviderCalendarRequest'
+            example:
+              calendarId: doctor.maria@clinic.example
+      responses:
+        '200':
+          description: Calendar assigned to the provider.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderCalendarAssignmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/TemporaryUnavailable'
+
+    delete:
+      tags:
+        - Appointment Provider Calendars
+      summary: Remove a provider Google calendar assignment
+      description: Idempotently removes the provider's current calendar assignment.
+      operationId: unassignProviderGoogleCalendar
+      responses:
+        '200':
+          description: Provider calendar is unassigned or was already unassigned.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderCalendarUnassignmentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        MercadoX JWT. The verified token supplies organization and administrator identity.
+
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Caller-provided correlation identifier. The service generates one when absent.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+
+  headers:
+    CorrelationId:
+      description: Correlation identifier used for the request.
+      required: true
+      schema:
+        type: string
+    NoStore:
+      description: Prevents caching of authorization transaction data.
+      required: true
+      schema:
+        type: string
+        enum:
+          - no-store
+
+  responses:
+    BadRequest:
+      description: Request validation failed.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: MercadoX authentication is missing or invalid.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: The authenticated user cannot administer appointment integrations.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: Tenant connection, provider, or calendar was not found.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: Current connection or calendar assignment state prevents the operation.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    RateLimited:
+      description: The tenant or upstream provider rate limit was reached.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+        Retry-After:
+          description: Seconds the client should wait before retrying.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TemporaryUnavailable:
+      description: Google Calendar or a required MercadoX dependency is temporarily unavailable.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+        Retry-After:
+          description: Seconds the client should wait before retrying, when known.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    StartConnectionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - returnPath
+      properties:
+        returnPath:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: '^/[A-Za-z0-9/_?&=.%~-]*$'
+          description: |
+            Relative MercadoX frontend path. The server must also validate it against an
+            explicit allowlist before storing it in the authorization transaction.
+
+    AssignProviderCalendarRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - calendarId
+      properties:
+        calendarId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: Google calendar identifier returned by the calendar-list operation.
+
+    StartConnectionResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseMetadata'
+        - type: object
+          required:
+            - payload
+          properties:
+            code:
+              type: string
+              enum:
+                - GOOGLE_AUTHORIZATION_STARTED
+            payload:
+              $ref: '#/components/schemas/AuthorizationStart'
+
+    ConnectionResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseMetadata'
+        - type: object
+          required:
+            - payload
+          properties:
+            code:
+              type: string
+              enum:
+                - GOOGLE_CONNECTION_RETRIEVED
+            payload:
+              $ref: '#/components/schemas/GoogleCalendarConnection'
+
+    DisconnectConnectionResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseMetadata'
+        - type: object
+          required:
+            - payload
+          properties:
+            code:
+              type: string
+              enum:
+                - GOOGLE_CONNECTION_DISCONNECTED
+            payload:
+              $ref: '#/components/schemas/DisconnectResult'
+
+    CalendarListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseMetadata'
+        - type: object
+          required:
+            - payload
+          properties:
+            code:
+              type: string
+              enum:
+                - GOOGLE_CALENDARS_RETRIEVED
+            payload:
+              $ref: '#/components/schemas/GoogleCalendarPage'
+
+    ProviderCalendarAssignmentResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseMetadata'
+        - type: object
+          required:
+            - payload
+          properties:
+            code:
+              type: string
+              enum:
+                - PROVIDER_CALENDAR_ASSIGNED
+            payload:
+              $ref: '#/components/schemas/ProviderCalendarAssignment'
+
+    ProviderCalendarUnassignmentResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseMetadata'
+        - type: object
+          required:
+            - payload
+          properties:
+            code:
+              type: string
+              enum:
+                - PROVIDER_CALENDAR_UNASSIGNED
+            payload:
+              $ref: '#/components/schemas/ProviderCalendarUnassignment'
+
+    ApiResponseMetadata:
+      type: object
+      required:
+        - code
+        - message
+        - timestamp
+        - correlationId
+        - httpStatusCode
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable result code.
+        message:
+          type: string
+          description: Safe human-readable result description.
+        timestamp:
+          type: string
+          format: date-time
+          description: UTC response timestamp.
+        correlationId:
+          type: string
+          description: Correlation identifier matching the response header.
+        httpStatusCode:
+          type: integer
+          format: int32
+          description: HTTP status code mirrored from the shared MercadoX response envelope.
+
+    ApiError:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - timestamp
+        - correlationId
+        - httpStatusCode
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+          description: Safe error description without upstream payloads, credentials, or stack traces.
+        timestamp:
+          type: string
+          format: date-time
+        correlationId:
+          type: string
+        httpStatusCode:
+          type: integer
+          format: int32
+        fieldErrors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldViolation'
+
+    FieldViolation:
+      type: object
+      additionalProperties: false
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+
+    ErrorCode:
+      type: string
+      enum:
+        - INVALID_REQUEST
+        - UNAUTHENTICATED
+        - FORBIDDEN
+        - INVALID_OAUTH_STATE
+        - OAUTH_ACCESS_DENIED
+        - REQUIRED_SCOPES_NOT_GRANTED
+        - GOOGLE_CONNECTION_NOT_CONFIGURED
+        - GOOGLE_CONNECTION_ALREADY_ACTIVE
+        - REAUTH_REQUIRED
+        - GOOGLE_CALENDAR_NOT_FOUND
+        - GOOGLE_CALENDAR_INSUFFICIENT_ACCESS
+        - GOOGLE_CALENDAR_ALREADY_ASSIGNED
+        - PROVIDER_NOT_FOUND
+        - RATE_LIMITED
+        - TEMPORARY_UNAVAILABLE
+
+    AuthorizationStart:
+      type: object
+      additionalProperties: false
+      required:
+        - authorizationUrl
+        - expiresAt
+        - purpose
+      properties:
+        authorizationUrl:
+          type: string
+          format: uri
+          description: Google authorization URL containing the opaque state value.
+        expiresAt:
+          type: string
+          format: date-time
+        purpose:
+          type: string
+          enum:
+            - CONNECT
+            - REAUTHORIZE
+
+    GoogleCalendarConnection:
+      type: object
+      additionalProperties: false
+      required:
+        - connectionId
+        - accountEmail
+        - status
+        - grantedScopes
+        - connectedAt
+        - mappedProviderCount
+      properties:
+        connectionId:
+          type: string
+          format: uuid
+        accountEmail:
+          type: string
+          format: email
+        status:
+          $ref: '#/components/schemas/ConnectionStatus'
+        grantedScopes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        connectedAt:
+          type: string
+          format: date-time
+        lastSuccessfulRefreshAt:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        mappedProviderCount:
+          type: integer
+          minimum: 0
+
+    ConnectionStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - REAUTH_REQUIRED
+        - REVOKED
+
+    DisconnectResult:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - credentialDeleted
+        - googleGrantRevoked
+        - alreadyDisconnected
+      properties:
+        status:
+          type: string
+          enum:
+            - REVOKED
+        credentialDeleted:
+          type: boolean
+        googleGrantRevoked:
+          type: boolean
+          description: False when Google revocation could not be confirmed.
+        alreadyDisconnected:
+          type: boolean
+
+    GoogleCalendarPage:
+      type: object
+      additionalProperties: false
+      required:
+        - calendars
+      properties:
+        calendars:
+          type: array
+          items:
+            $ref: '#/components/schemas/GoogleCalendarSummary'
+        nextPageToken:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: 'null'
+          description: Opaque MercadoX continuation token; absent or null on the final page.
+
+    GoogleCalendarSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - calendarId
+        - displayName
+        - primary
+        - accessRole
+        - selectable
+      properties:
+        calendarId:
+          type: string
+          maxLength: 1024
+        displayName:
+          type: string
+          maxLength: 1024
+        timeZone:
+          oneOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        primary:
+          type: boolean
+        accessRole:
+          $ref: '#/components/schemas/GoogleCalendarAccessRole'
+        selectable:
+          type: boolean
+          description: True only when the effective role supports event creation.
+        assignedProviderId:
+          oneOf:
+            - type: string
+              format: uuid
+            - type: 'null'
+
+    GoogleCalendarAccessRole:
+      type: string
+      enum:
+        - freeBusyReader
+        - reader
+        - writerWithoutPrivateAccess
+        - writer
+        - owner
+
+    ProviderCalendarAssignment:
+      type: object
+      additionalProperties: false
+      required:
+        - providerId
+        - calendarId
+        - calendarDisplayName
+        - timeZone
+        - accessRole
+      properties:
+        providerId:
+          type: string
+          format: uuid
+        calendarId:
+          type: string
+          maxLength: 1024
+        calendarDisplayName:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+          maxLength: 64
+        accessRole:
+          $ref: '#/components/schemas/GoogleCalendarAccessRole'
+
+    ProviderCalendarUnassignment:
+      type: object
+      additionalProperties: false
+      required:
+        - providerId
+        - calendarAssigned
+        - alreadyUnassigned
+      properties:
+        providerId:
+          type: string
+          format: uuid
+        calendarAssigned:
+          type: boolean
+          enum:
+            - false
+        alreadyUnassigned:
+          type: boolean

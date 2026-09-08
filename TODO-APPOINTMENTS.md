@@ -98,18 +98,20 @@ boundary. Treat domain-wide delegation as **P2 enterprise work**, not the V1 def
 - [ ] **P0 — Define provider identity.** Decide whether V1 providers reference an existing
   MercadoX user UUID or use an appointments-owned provider record with an optional external
   reference. Do not couple scheduling logic to the existing `core.appointment` entity.
-- [ ] **P0 — Publish an OpenAPI contract** for:
+- [ ] **P0 — Publish the complete V1 OpenAPI contract** for:
 
-    - `POST /internal/v1/appointment-slots/search`
-    - `POST /internal/v1/appointments`
-    - tenant-admin connection, calendar-selection, provider, and policy endpoints
+    - [ ] `POST /internal/v1/appointment-slots/search`
+    - [ ] `POST /internal/v1/appointments`
+    - [x] Google Calendar connection, calendar-discovery, and provider-assignment endpoints
+      in `openapi/google-calendar-onboarding-v1.yaml`
+    - [ ] tenant-admin provider, offering, and availability-policy endpoints
 
 - [ ] **P0 — Freeze a safe error vocabulary:** `NO_SLOTS`, `SLOT_EXPIRED`, `CONFLICT`,
   `REAUTH_REQUIRED`, `NOT_CONFIGURED`, `RATE_LIMITED`, and `TEMPORARY_UNAVAILABLE`.
   Provider payloads, tokens, and stack traces must never cross into Claude tool results.
-- [ ] **P1 — Audit the existing `core.appointment` table/entity.** If unused, deprecate and
-  remove it in a separate migration after the new service ships. If data exists, write an
-  explicit migration plan; do not silently reuse or delete it.
+- [x] **P1 — Remove the unused `core.appointment` table/entity.** The legacy entity was removed
+  from the shared entity library and the core-schema owner drops the table through its own
+  append-only `V40` migration without `CASCADE`.
 
 **Exit gate:** service ownership, auth assumptions, HTTP schemas, and the V1/non-V1 line are
 reviewed before implementation begins.
@@ -123,13 +125,13 @@ reviewed before implementation begins.
   `mercado-x-parent` and `mercado-x-email`.
 - [x] **P0 — Add only the required foundations:** Web MVC/WebClient, validation, security,
   JPA/PostgreSQL, Flyway, Redis, Kafka/Avro, Actuator, and test dependencies.
-- [ ] **P0 — Give the bounded context its own `appointments` database schema** and migration
-  ownership. It may initially use the existing PostgreSQL cluster, but appointment tables
-  and migrations belong to this service.
-- [ ] **P0 — Keep appointment JPA entities, repositories, and Flyway locations in this
-  service.** Reuse `mercado-x-context` and shared wire contracts where appropriate, but do
-  not add the new scheduling model to `mercado-x-core` or extend the old shared
-  `core.appointment` entity.
+- [x] **P0 — Give the bounded context its own `appointments` database schema.** It initially
+  uses the existing PostgreSQL cluster and the ecosystem's centralized migration chain in
+  `mercado-x-library-jpa`.
+- [x] **P0 — Follow the shared module boundaries.** Keep appointment domain entities and DTOs
+  in `mercado-x-library-entity`, repositories and the centralized Flyway sequence in
+  `mercado-x-library-jpa`, and appointment business logic in this service. Do not add the new
+  scheduling model to `mercado-x-core` or extend the old `core.appointment` entity.
 - [ ] **P0 — Add configuration properties** for Google OAuth, internal-client auth, Google API
   timeouts, slot-token TTL, Redis locks, availability-cache TTL, and booking limits.
 - [ ] **P0 — Add health/readiness checks** for PostgreSQL and Redis. Google should be reported
@@ -146,20 +148,25 @@ schema, and exposes health endpoints.
 
 ## 4. Milestone 2 — Tenant-owned data model
 
+- [x] **P0 — Create the `appointments` schema and initial Flyway domain migration** in the
+  centralized `mercado-x-library-jpa` sequence. The migration creates the four-table V1
+  scheduling model and its tenant-aware constraints and indexes.
 - [ ] **P0 — Create `GoogleCalendarConnection`:** `id`, `org_id`, Google subject/email,
   encrypted refresh-token reference/ciphertext, granted scopes, status
   (`ACTIVE`, `REAUTH_REQUIRED`, `REVOKED`), last successful refresh, and audit timestamps.
-- [ ] **P0 — Create `AppointmentProvider`:** tenant-owned doctor/provider identity, display
-  name, timezone, active flag, and optional reference to an existing MercadoX user.
-- [ ] **P0 — Create `ProviderCalendar`:** connection, provider, opaque Google `calendar_id`,
-  display name, access role, calendar timezone, enabled flag, and last validation time.
-- [ ] **P0 — Create `AppointmentType` and `AvailabilityPolicy`:** duration, weekly working
-  hours, buffers, minimum notice, booking horizon, timezone, and allowed providers.
-- [ ] **P0 — Create `AppointmentBooking`:** org, provider, appointment type, customer and
-  conversation references, start/end instants, timezone, status, Google event ID,
-  MercadoX booking ID, idempotency key, and audit timestamps.
-- [ ] **P0 — Enforce tenant keys and uniqueness in PostgreSQL,** including unique
-  `(org_id, idempotency_key)` and `(org_id, google_event_id)` constraints.
+- [ ] **P0 — Implement `BookableService`:** tenant-owned service name, description, duration,
+  active flag, and audit timestamps on top of its migrated table.
+- [ ] **P0 — Implement `AppointmentProvider`:** tenant-owned doctor/provider identity, display
+  name, timezone, current Google calendar ID, active flag, and optional MercadoX user reference
+  on top of its migrated table.
+- [ ] **P0 — Implement `ProviderOffering`:** first-class association between a provider and a
+  bookable service, with weekly availability and active state on top of its migrated table.
+- [ ] **P0 — Implement `AppointmentBooking`:** a booked occurrence of a provider offering with
+  customer/conversation references, start/end instants, timezone, status, Google event locator,
+  idempotency key, and audit timestamps on top of its migrated table.
+- [x] **P0 — Enforce tenant keys and uniqueness in PostgreSQL,** including composite tenant
+  foreign keys, unique `(org_id, idempotency_key)`, and unique
+  `(org_id, google_calendar_id, google_event_id)` indexes.
 - [ ] **P0 — Keep provider/calendar IDs out of model-controlled authority.** Every repository
   query must constrain by the trusted `orgId`, even when IDs are globally unique UUIDs.
 - [ ] **P1 — Add redacted audit records** for connection changes, calendar enablement,
@@ -175,9 +182,9 @@ another organization's connection, calendars, policies, or bookings.
 - [ ] **P0 — Configure the Google Cloud project** with Calendar API enabled, production OAuth
   consent configuration, approved HTTPS redirect URIs, privacy/terms links, and the minimal
   read-availability plus event-write scopes.
-- [ ] **P0 — Implement `POST /api/v1/google-calendar/connections/start`.** Generate a signed,
-  short-lived OAuth `state` bound to `orgId`, administrator identity, nonce, and return URL;
-  request offline access.
+- [x] **P0 — Implement `POST /api/v1/google-calendar/connections/start`.** Generate an opaque,
+  one-time, short-lived OAuth `state` stored by hash in Redis and bound to trusted `orgId`,
+  administrator identity, purpose, and an allowlisted return path; request offline access.
 - [ ] **P0 — Implement the OAuth callback.** Verify state and one-time nonce before exchanging
   the authorization code. The callback may be public, but it is authenticated by the state
   transaction and must not accept tenant identity from query parameters.
