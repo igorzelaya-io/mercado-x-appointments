@@ -47,7 +47,7 @@
         <dependency>
             <groupId>hn.shadowcore</groupId>
             <artifactId>mercado-x-context</artifactId>
-            <version>1.0.0</version>
+            <version>1.0.1</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.springframework.boot</groupId>
@@ -77,7 +77,7 @@
         <dependency>
             <groupId>hn.shadowcore</groupId>
             <artifactId>mercado-x-library-jpa</artifactId>
-            <version>1.0.1</version>
+            <version>1.0.2</version>
         </dependency>
 
         <!-- HTTP, validation, security, and Google OAuth client support. -->
