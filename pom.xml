@@ -11,7 +11,7 @@
         <relativePath/>
     </parent>
 
-    <groupId>hn.shadowcore</groupId>
+    <groupId>hn.alturaforge</groupId>
     <artifactId>mercado-x-appointments</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>mercado-x-appointments</name>
@@ -45,7 +45,7 @@
     <dependencies>
         <!-- MercadoX shared runtime, domain models, wire contracts, and repositories. -->
         <dependency>
-            <groupId>hn.shadowcore</groupId>
+            <groupId>hn.alturaforge</groupId>
             <artifactId>mercado-x-context</artifactId>
             <version>1.0.1</version>
             <exclusions>
@@ -60,7 +60,7 @@
             </exclusions>
         </dependency>
         <dependency>
-            <groupId>hn.shadowcore</groupId>
+            <groupId>hn.alturaforge</groupId>
             <artifactId>mercado-x-library-entity</artifactId>
             <version>1.0.0</version>
             <exclusions>
@@ -75,7 +75,7 @@
             </exclusions>
         </dependency>
         <dependency>
-            <groupId>hn.shadowcore</groupId>
+            <groupId>hn.alturaforge</groupId>
             <artifactId>mercado-x-library-jpa</artifactId>
             <version>1.0.2</version>
         </dependency>
